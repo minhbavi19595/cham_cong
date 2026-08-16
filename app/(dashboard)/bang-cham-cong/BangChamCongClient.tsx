@@ -174,6 +174,11 @@ export default function BangChamCongClient({ user }: PageProps) {
     }
 
     function handleCellClick(uid: string, d: number) {
+        if (user.role === 'admin') {
+            toast.error('Quản trị viên chỉ có quyền xem bảng chấm công, không được phép chấm công.');
+            return;
+        }
+
         const dateStr = getDateStr(d);
         const locked = isLockedMonth(d);
         const past = isPastDay(d);
@@ -596,10 +601,10 @@ export default function BangChamCongClient({ user }: PageProps) {
                                                     <div
                                                         id={`cell-${u.id.slice(0, 8)}-${dateStr}`}
                                                         className={cellClass + (rec ? colorCls : '')}
-                                                        onClick={() => !locked && handleCellClick(u.id, d)}
-                                                        title={rec?.type_name || (locked ? 'Đã chốt' : 'Click để chấm')}
+                                                        onClick={() => user.role !== 'admin' && !locked && handleCellClick(u.id, d)}
+                                                        title={rec?.type_name || (locked ? 'Đã chốt' : (user.role === 'admin' ? 'Chỉ xem' : 'Click để chấm'))}
                                                         style={{
-                                                            cursor: !locked ? 'pointer' : 'default',
+                                                            cursor: (user.role !== 'admin' && !locked) ? 'pointer' : 'default',
                                                             margin: '0 auto',
                                                         }}
                                                     >

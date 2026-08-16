@@ -106,7 +106,7 @@ BEGIN
     WHERE EXTRACT(MONTH FROM ar.work_date) = p_month
       AND EXTRACT(YEAR  FROM ar.work_date) = p_year
       AND u.is_active = true
-      AND (u.manager_id = v_target_manager OR u.id = v_target_manager)
+      AND u.manager_id = v_target_manager
     ORDER BY u.full_name, ar.work_date
   ) t;
   
@@ -186,7 +186,7 @@ BEGIN
   FROM (
     SELECT id, full_name, email, role, position, is_active, created_at, manager_id
     FROM public.users
-    WHERE (manager_id = v_target_manager OR id = v_target_manager) AND is_active = true
+    WHERE manager_id = v_target_manager AND is_active = true
     ORDER BY CASE WHEN id = v_target_manager THEN 0 ELSE 1 END, full_name
   ) t;
 

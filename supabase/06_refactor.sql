@@ -156,6 +156,7 @@ BEGIN
   FROM (
     SELECT id, full_name, email, role, position, is_active, created_at
     FROM public.users
+    WHERE manager_id IS NULL
     ORDER BY full_name
   ) t;
 

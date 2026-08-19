@@ -46,6 +46,8 @@ export default function BangChamCongClient({ user }: PageProps) {
     const [reason, setReason] = useState('');
     const [submitting, setSubmitting] = useState(false);
 
+    const [nameColWidth, setNameColWidth] = useState(160);
+
     const daysInMonth = dayjs(`${year}-${month}-01`).daysInMonth();
     const days = Array.from({ length: daysInMonth }, (_, i) => i + 1);
 
@@ -108,6 +110,9 @@ export default function BangChamCongClient({ user }: PageProps) {
             let totalDutyDays = 0;
             for (const s of sumArr) {
                 s.duty_days = 0;
+                s.tr_days = 0;
+                s.trv_days = 0;
+                s.tr_nl_days = 0;
                 sumMap[s.user_id] = s;
                 totalWorkDays += Number(s.work_days) || 0;
             }
@@ -117,13 +122,17 @@ export default function BangChamCongClient({ user }: PageProps) {
             for (const r of (recordsRes.data || [])) {
                 typeCounts[r.type_code] = (typeCounts[r.type_code] || 0) + 1;
 
-                // Đếm ngày trực
-                const isDuty = r.type_name?.toLowerCase().includes('trực') ||
-                    r.type_group?.toLowerCase().includes('trực') ||
-                    r.type_group === 'DUTY';
-                if (isDuty && sumMap[r.user_id]) {
-                    sumMap[r.user_id].duty_days += 1;
-                    totalDutyDays += 1;
+                if (sumMap[r.user_id]) {
+                    if (r.type_code === 'TR') sumMap[r.user_id].tr_days += 1;
+                    else if (r.type_code === 'TRV') sumMap[r.user_id].trv_days += 1;
+                    else if (r.type_code === 'TR_NL') sumMap[r.user_id].tr_nl_days += 1;
+
+                    // Đếm tổng ngày trực cho mục đích khác (nếu cần)
+                    const isDuty = ['TR', 'TRV', 'TR_NL'].includes(r.type_code);
+                    if (isDuty) {
+                        sumMap[r.user_id].duty_days += 1;
+                        totalDutyDays += 1;
+                    }
                 }
             }
             setSummary({ work_days: totalWorkDays, duty_days: totalDutyDays, ...typeCounts });
@@ -144,6 +153,39 @@ export default function BangChamCongClient({ user }: PageProps) {
     }, [month, year, selectedManagerId, user.role]);
 
     useEffect(() => { loadData(); }, [loadData]);
+
+    useEffect(() => {
+        if (!loading && month === dayjs().month() + 1 && year === dayjs().year()) {
+            setTimeout(() => {
+                const todayCol = document.getElementById('today-col');
+                const container = document.getElementById('grid-scroll-container');
+                if (todayCol && container) {
+                    const thNhanVien = document.getElementById('th-nhan-vien');
+                    const thChucVu = document.getElementById('th-chuc-vu');
+                    const leftStickyWidth = (thNhanVien?.offsetWidth || 160) + (thChucVu?.offsetWidth || 120);
+                    const rightStickyWidth = 424; // 7 cột bên phải (64*4 + 56*3)
+                    const availableWidth = container.clientWidth - leftStickyWidth - rightStickyWidth;
+                    
+                    const colCenter = todayCol.offsetLeft + (todayCol.offsetWidth / 2);
+                    const viewportCenter = leftStickyWidth + (availableWidth / 2);
+                    
+                    const targetScrollLeft = colCenter - viewportCenter;
+                    container.scrollTo({ left: Math.max(0, targetScrollLeft), behavior: 'smooth' });
+                }
+            }, 100);
+        }
+
+        const thNhanVien = document.getElementById('th-nhan-vien');
+        if (thNhanVien) {
+            const observer = new ResizeObserver(entries => {
+                for (const entry of entries) {
+                    setNameColWidth(entry.target.getBoundingClientRect().width);
+                }
+            });
+            observer.observe(thNhanVien);
+            return () => observer.disconnect();
+        }
+    }, [loading, month, year]);
 
     // Build grid: userId → { 'YYYY-MM-DD': record }
     const grid: AttendanceGrid = {};
@@ -357,7 +399,7 @@ export default function BangChamCongClient({ user }: PageProps) {
         for (let i = 1; i <= daysInMonth; i++) {
             h1.push(i === 1 ? 'Ngày trong tháng' : '');
         }
-        h1.push('Hành chính', 'Trực', 'Nghỉ bù còn dư', 'Nghỉ tuần còn dư', 'Phép còn dư');
+        h1.push('Hành chính', 'Nghỉ bù còn dư', 'Nghỉ tuần còn dư', 'Phép còn dư', 'Trực lễ', 'Trực', 'Trực viện');
         aoa.push(h1);
         currentRow++;
 
@@ -381,10 +423,12 @@ export default function BangChamCongClient({ user }: PageProps) {
             }
             const bal = userBalances[u.id] as any;
             row.push(bal?.work_days || 0);
-            row.push(bal?.duty_days || 0);
             row.push(bal?.comp_off_balance || 0);
             row.push(bal?.weekly_off_balance || 0);
             row.push(bal?.leave_remaining || 0);
+            row.push(bal?.tr_nl_days || 0);
+            row.push(bal?.tr_days || 0);
+            row.push(bal?.trv_days || 0);
             aoa.push(row);
             currentRow++;
         });
@@ -397,17 +441,19 @@ export default function BangChamCongClient({ user }: PageProps) {
             { s: { r: h1Row, c: 1 }, e: { r: h2Row, c: 1 } }, // Chức vụ
             { s: { r: h1Row, c: 2 }, e: { r: h1Row, c: 2 + daysInMonth - 1 } }, // Header: Ngày trong tháng
             { s: { r: h1Row, c: 2 + daysInMonth }, e: { r: h2Row, c: 2 + daysInMonth } }, // Hành chính
-            { s: { r: h1Row, c: 2 + daysInMonth + 1 }, e: { r: h2Row, c: 2 + daysInMonth + 1 } }, // Trực
-            { s: { r: h1Row, c: 2 + daysInMonth + 2 }, e: { r: h2Row, c: 2 + daysInMonth + 2 } }, // Bù
-            { s: { r: h1Row, c: 2 + daysInMonth + 3 }, e: { r: h2Row, c: 2 + daysInMonth + 3 } }, // Tuần
-            { s: { r: h1Row, c: 2 + daysInMonth + 4 }, e: { r: h2Row, c: 2 + daysInMonth + 4 } }  // Phép
+            { s: { r: h1Row, c: 2 + daysInMonth + 1 }, e: { r: h2Row, c: 2 + daysInMonth + 1 } }, // Bù
+            { s: { r: h1Row, c: 2 + daysInMonth + 2 }, e: { r: h2Row, c: 2 + daysInMonth + 2 } }, // Tuần
+            { s: { r: h1Row, c: 2 + daysInMonth + 3 }, e: { r: h2Row, c: 2 + daysInMonth + 3 } }, // Phép
+            { s: { r: h1Row, c: 2 + daysInMonth + 4 }, e: { r: h2Row, c: 2 + daysInMonth + 4 } }, // Trực lễ
+            { s: { r: h1Row, c: 2 + daysInMonth + 5 }, e: { r: h2Row, c: 2 + daysInMonth + 5 } }, // Trực
+            { s: { r: h1Row, c: 2 + daysInMonth + 6 }, e: { r: h2Row, c: 2 + daysInMonth + 6 } }  // Trực viện
         );
         ws['!merges'] = merges;
 
         // Căn chỉnh độ rộng cột (Column Widths) để bảng nhỏ gọn vừa 1 màn hình
         const cols = [{ wch: 22 }, { wch: 15 }];
         for (let i = 1; i <= daysInMonth; i++) cols.push({ wch: 4 }); // Thu nhỏ các cột ngày
-        cols.push({ wch: 11 }, { wch: 6 }, { wch: 13 }, { wch: 13 }, { wch: 11 });
+        cols.push({ wch: 11 }, { wch: 13 }, { wch: 13 }, { wch: 11 }, { wch: 9 }, { wch: 6 }, { wch: 9 });
         ws['!cols'] = cols;
 
         const wb = XLSX.utils.book_new();
@@ -416,7 +462,7 @@ export default function BangChamCongClient({ user }: PageProps) {
     }
 
     return (
-        <div className="p-6 flex flex-col gap-6 min-h-full">
+        <div className="p-6 flex flex-col gap-6 h-full overflow-hidden">
             {/* Header */}
             <div className="flex items-center justify-between flex-wrap gap-3">
                 <div>
@@ -501,35 +547,40 @@ export default function BangChamCongClient({ user }: PageProps) {
 
 
             {/* Grid */}
-            <div className="glass-card overflow-hidden">
+            <div className="glass-card flex flex-col flex-1 min-h-0 overflow-hidden">
                 {loading ? (
-                    <div className="flex items-center justify-center p-16">
+                    <div className="flex items-center justify-center p-16 flex-1">
                         <svg className="animate-spin" width="32" height="32" viewBox="0 0 24 24" fill="none">
                             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="#3b82f6" strokeWidth="4" />
                             <path className="opacity-75" fill="#3b82f6" d="M4 12a8 8 0 018-8v8z" />
                         </svg>
                     </div>
                 ) : (
-                    <div className="overflow-x-auto">
+                    <div className="overflow-auto flex-1 min-h-0" id="grid-scroll-container">
                         <table className="table-dark" style={{ minWidth: 800 }}>
                             <thead>
                                 <tr>
-                                    <th style={{ minWidth: 160, position: 'sticky', left: 0, zIndex: 3, background: 'rgba(15,23,42,0.95)' }}>
+                                    <th id="th-nhan-vien" style={{ minWidth: 160, position: 'sticky', top: 0, left: 0, zIndex: 4, background: 'rgba(15,23,42,0.95)' }}>
                                         Nhân viên
                                     </th>
-                                    <th style={{ minWidth: 120, position: 'sticky', left: 160, zIndex: 3, background: 'rgba(15,23,42,0.95)', borderRight: '1px solid rgba(51,65,85,0.5)' }}>
+                                    <th id="th-chuc-vu" style={{ minWidth: 120, position: 'sticky', top: 0, left: nameColWidth, zIndex: 4, background: 'rgba(15,23,42,0.95)', borderRight: '1px solid rgba(51,65,85,0.5)' }}>
                                         Chức vụ
                                     </th>
                                     {days.map(d => {
                                         const dow = dayjs(getDateStr(d)).day();
                                         const isWknd = isWeekend(d);
+                                        const tod = isToday(d);
                                         const colBg = isWknd ? 'rgba(51,65,85,0.25)' : 'transparent';
                                         const colColor = isWknd ? '#94a3b8' : '#64748b';
                                         return (
                                             <th
                                                 key={d}
+                                                id={tod ? 'today-col' : undefined}
                                                 title={isWknd ? 'Cuối tuần' : undefined}
                                                 style={{
+                                                    position: 'sticky',
+                                                    top: 0,
+                                                    zIndex: 3,
                                                     padding: '0.4rem 0.15rem',
                                                     color: colColor,
                                                     textAlign: 'center',
@@ -546,12 +597,14 @@ export default function BangChamCongClient({ user }: PageProps) {
                                             </th>
                                         );
                                     })}
-                                    {/* 5 cột cố định bên phải */}
-                                    <th style={{ position: 'sticky', right: 248, zIndex: 3, background: 'rgba(15,23,42,0.98)', width: 64, minWidth: 64, maxWidth: 64, textAlign: 'center', borderLeft: '1px solid rgba(51,65,85,0.5)', color: '#8b5cf6', fontSize: '0.65rem', whiteSpace: 'normal', lineHeight: 1.2, padding: '0.3rem 0.2rem' }}>Hành chính</th>
-                                    <th style={{ position: 'sticky', right: 192, zIndex: 3, background: 'rgba(15,23,42,0.98)', width: 56, minWidth: 56, maxWidth: 56, textAlign: 'center', borderLeft: '1px solid rgba(51,65,85,0.5)', color: '#ec4899', fontSize: '0.65rem', whiteSpace: 'normal', lineHeight: 1.2, padding: '0.3rem 0.2rem' }}>Trực</th>
-                                    <th style={{ position: 'sticky', right: 128, zIndex: 3, background: 'rgba(15,23,42,0.98)', width: 64, minWidth: 64, maxWidth: 64, textAlign: 'center', borderLeft: '1px solid rgba(51,65,85,0.5)', color: '#f59e0b', fontSize: '0.65rem', whiteSpace: 'normal', lineHeight: 1.2, padding: '0.3rem 0.2rem' }}>Nghỉ bù còn dư</th>
-                                    <th style={{ position: 'sticky', right: 64, zIndex: 3, background: 'rgba(15,23,42,0.98)', width: 64, minWidth: 64, maxWidth: 64, textAlign: 'center', borderLeft: '1px solid rgba(51,65,85,0.5)', color: '#3b82f6', fontSize: '0.65rem', whiteSpace: 'normal', lineHeight: 1.2, padding: '0.3rem 0.2rem' }}>Nghỉ tuần còn dư</th>
-                                    <th style={{ position: 'sticky', right: 0, zIndex: 3, background: 'rgba(15,23,42,0.98)', width: 64, minWidth: 64, maxWidth: 64, textAlign: 'center', borderLeft: '1px solid rgba(51,65,85,0.5)', color: '#10b981', fontSize: '0.65rem', whiteSpace: 'normal', lineHeight: 1.2, padding: '0.3rem 0.2rem' }}>Phép còn dư</th>
+                                    {/* 7 cột cố định bên phải */}
+                                    <th style={{ position: 'sticky', top: 0, right: 360, zIndex: 4, background: 'rgba(15,23,42,0.98)', width: 64, minWidth: 64, maxWidth: 64, textAlign: 'center', borderLeft: '1px solid rgba(51,65,85,0.5)', color: '#8b5cf6', fontSize: '0.65rem', whiteSpace: 'normal', lineHeight: 1.2, padding: '0.3rem 0.2rem' }}>Hành chính</th>
+                                    <th style={{ position: 'sticky', top: 0, right: 296, zIndex: 4, background: 'rgba(15,23,42,0.98)', width: 64, minWidth: 64, maxWidth: 64, textAlign: 'center', borderLeft: '1px solid rgba(51,65,85,0.5)', color: '#f59e0b', fontSize: '0.65rem', whiteSpace: 'normal', lineHeight: 1.2, padding: '0.3rem 0.2rem' }}>Nghỉ bù còn dư</th>
+                                    <th style={{ position: 'sticky', top: 0, right: 232, zIndex: 4, background: 'rgba(15,23,42,0.98)', width: 64, minWidth: 64, maxWidth: 64, textAlign: 'center', borderLeft: '1px solid rgba(51,65,85,0.5)', color: '#3b82f6', fontSize: '0.65rem', whiteSpace: 'normal', lineHeight: 1.2, padding: '0.3rem 0.2rem' }}>Nghỉ tuần còn dư</th>
+                                    <th style={{ position: 'sticky', top: 0, right: 168, zIndex: 4, background: 'rgba(15,23,42,0.98)', width: 64, minWidth: 64, maxWidth: 64, textAlign: 'center', borderLeft: '1px solid rgba(51,65,85,0.5)', color: '#10b981', fontSize: '0.65rem', whiteSpace: 'normal', lineHeight: 1.2, padding: '0.3rem 0.2rem' }}>Phép còn dư</th>
+                                    <th style={{ position: 'sticky', top: 0, right: 112, zIndex: 4, background: 'rgba(15,23,42,0.98)', width: 56, minWidth: 56, maxWidth: 56, textAlign: 'center', borderLeft: '1px solid rgba(51,65,85,0.5)', color: '#ec4899', fontSize: '0.65rem', whiteSpace: 'normal', lineHeight: 1.2, padding: '0.3rem 0.2rem' }}>Trực lễ</th>
+                                    <th style={{ position: 'sticky', top: 0, right: 56, zIndex: 4, background: 'rgba(15,23,42,0.98)', width: 56, minWidth: 56, maxWidth: 56, textAlign: 'center', borderLeft: '1px solid rgba(51,65,85,0.5)', color: '#ec4899', fontSize: '0.65rem', whiteSpace: 'normal', lineHeight: 1.2, padding: '0.3rem 0.2rem' }}>Trực</th>
+                                    <th style={{ position: 'sticky', top: 0, right: 0, zIndex: 4, background: 'rgba(15,23,42,0.98)', width: 56, minWidth: 56, maxWidth: 56, textAlign: 'center', borderLeft: '1px solid rgba(51,65,85,0.5)', color: '#ec4899', fontSize: '0.65rem', whiteSpace: 'normal', lineHeight: 1.2, padding: '0.3rem 0.2rem' }}>Trực viện</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -564,13 +617,13 @@ export default function BangChamCongClient({ user }: PageProps) {
                                 )}
                                 {displayUsers.map(u => (
                                     <tr key={u.id}>
-                                        <td style={{ position: 'sticky', left: 0, zIndex: 2, background: 'rgba(15,23,42,0.95)', minWidth: 160 }}>
-                                            <div className="flex items-center justify-between group">
-                                                <div className="font-medium text-sm" style={{ color: '#f1f5f9' }}>{u.full_name}</div>
+                                        <td style={{ minWidth: 160, position: 'sticky', left: 0, zIndex: 2, background: 'rgba(15,23,42,0.95)' }}>
+                                            <div className="flex items-center justify-between group w-full px-1">
+                                                <div className="font-medium text-sm flex-1 whitespace-nowrap" style={{ color: '#f1f5f9' }} title={u.full_name}>{u.full_name}</div>
                                                 {user.role === 'staff' && u.id !== user.id && u.manager_id === user.id && (
                                                     <button
                                                         onClick={() => handleRemoveMember(u.id)}
-                                                        className="opacity-0 group-hover:opacity-100 transition-opacity p-1 text-slate-500 hover:text-red-400"
+                                                        className="opacity-0 group-hover:opacity-100 transition-opacity p-1 text-slate-500 hover:text-red-400 flex-shrink-0 ml-2"
                                                         title="Xoá nhân viên (xóa luôn dữ liệu)"
                                                     >
                                                         <X size={14} />
@@ -578,8 +631,8 @@ export default function BangChamCongClient({ user }: PageProps) {
                                                 )}
                                             </div>
                                         </td>
-                                        <td style={{ position: 'sticky', left: 160, zIndex: 2, background: 'rgba(15,23,42,0.95)', minWidth: 120, borderRight: '1px solid rgba(51,65,85,0.4)' }}>
-                                            <div className="text-xs truncate" style={{ color: '#94a3b8' }} title={u.position || ''}>{u.position || '—'}</div>
+                                        <td style={{ minWidth: 120, position: 'sticky', left: nameColWidth, zIndex: 2, background: 'rgba(15,23,42,0.95)', borderRight: '1px solid rgba(51,65,85,0.4)' }}>
+                                            <div className="text-xs whitespace-nowrap px-1" style={{ color: '#94a3b8' }} title={u.position || ''}>{u.position || '—'}</div>
                                         </td>
                                         {days.map(d => {
                                             const dateStr = getDateStr(d);
@@ -617,20 +670,26 @@ export default function BangChamCongClient({ user }: PageProps) {
                                         {(() => {
                                             const bal = userBalances[u.id] as any;
                                             return (<>
-                                                <td style={{ position: 'sticky', right: 248, zIndex: 1, background: 'rgba(15,23,42,0.98)', textAlign: 'center', borderLeft: '1px solid rgba(51,65,85,0.4)', fontWeight: 700, fontSize: '0.8rem', color: '#8b5cf6', width: 64, minWidth: 64, maxWidth: 64 }}>
+                                                <td style={{ position: 'sticky', right: 360, zIndex: 1, background: 'rgba(15,23,42,0.98)', textAlign: 'center', borderLeft: '1px solid rgba(51,65,85,0.4)', fontWeight: 700, fontSize: '0.8rem', color: '#8b5cf6', width: 64, minWidth: 64, maxWidth: 64 }}>
                                                     {bal ? bal.work_days : '–'}
                                                 </td>
-                                                <td style={{ position: 'sticky', right: 192, zIndex: 1, background: 'rgba(15,23,42,0.98)', textAlign: 'center', borderLeft: '1px solid rgba(51,65,85,0.4)', fontWeight: 700, fontSize: '0.8rem', color: '#ec4899', width: 56, minWidth: 56, maxWidth: 56 }}>
-                                                    {bal && bal.duty_days > 0 ? bal.duty_days : '–'}
-                                                </td>
-                                                <td style={{ position: 'sticky', right: 128, zIndex: 1, background: 'rgba(15,23,42,0.98)', textAlign: 'center', borderLeft: '1px solid rgba(51,65,85,0.4)', fontWeight: 700, fontSize: '0.8rem', color: '#f59e0b', width: 64, minWidth: 64, maxWidth: 64 }}>
+                                                <td style={{ position: 'sticky', right: 296, zIndex: 1, background: 'rgba(15,23,42,0.98)', textAlign: 'center', borderLeft: '1px solid rgba(51,65,85,0.4)', fontWeight: 700, fontSize: '0.8rem', color: '#f59e0b', width: 64, minWidth: 64, maxWidth: 64 }}>
                                                     {bal ? bal.comp_off_balance : '–'}
                                                 </td>
-                                                <td style={{ position: 'sticky', right: 64, zIndex: 1, background: 'rgba(15,23,42,0.98)', textAlign: 'center', borderLeft: '1px solid rgba(51,65,85,0.4)', fontWeight: 700, fontSize: '0.8rem', color: '#3b82f6', width: 64, minWidth: 64, maxWidth: 64 }}>
+                                                <td style={{ position: 'sticky', right: 232, zIndex: 1, background: 'rgba(15,23,42,0.98)', textAlign: 'center', borderLeft: '1px solid rgba(51,65,85,0.4)', fontWeight: 700, fontSize: '0.8rem', color: '#3b82f6', width: 64, minWidth: 64, maxWidth: 64 }}>
                                                     {bal ? bal.weekly_off_balance : '–'}
                                                 </td>
-                                                <td style={{ position: 'sticky', right: 0, zIndex: 1, background: 'rgba(15,23,42,0.98)', textAlign: 'center', borderLeft: '1px solid rgba(51,65,85,0.4)', fontWeight: 700, fontSize: '0.8rem', color: '#10b981', width: 64, minWidth: 64, maxWidth: 64 }}>
+                                                <td style={{ position: 'sticky', right: 168, zIndex: 1, background: 'rgba(15,23,42,0.98)', textAlign: 'center', borderLeft: '1px solid rgba(51,65,85,0.4)', fontWeight: 700, fontSize: '0.8rem', color: '#10b981', width: 64, minWidth: 64, maxWidth: 64 }}>
                                                     {bal ? bal.leave_remaining : '–'}
+                                                </td>
+                                                <td style={{ position: 'sticky', right: 112, zIndex: 1, background: 'rgba(15,23,42,0.98)', textAlign: 'center', borderLeft: '1px solid rgba(51,65,85,0.4)', fontWeight: 700, fontSize: '0.8rem', color: '#ec4899', width: 56, minWidth: 56, maxWidth: 56 }}>
+                                                    {bal && bal.tr_nl_days > 0 ? bal.tr_nl_days : '–'}
+                                                </td>
+                                                <td style={{ position: 'sticky', right: 56, zIndex: 1, background: 'rgba(15,23,42,0.98)', textAlign: 'center', borderLeft: '1px solid rgba(51,65,85,0.4)', fontWeight: 700, fontSize: '0.8rem', color: '#ec4899', width: 56, minWidth: 56, maxWidth: 56 }}>
+                                                    {bal && bal.tr_days > 0 ? bal.tr_days : '–'}
+                                                </td>
+                                                <td style={{ position: 'sticky', right: 0, zIndex: 1, background: 'rgba(15,23,42,0.98)', textAlign: 'center', borderLeft: '1px solid rgba(51,65,85,0.4)', fontWeight: 700, fontSize: '0.8rem', color: '#ec4899', width: 56, minWidth: 56, maxWidth: 56 }}>
+                                                    {bal && bal.trv_days > 0 ? bal.trv_days : '–'}
                                                 </td>
                                             </>);
                                         })()}
@@ -680,7 +739,7 @@ export default function BangChamCongClient({ user }: PageProps) {
                             <div>
                                 <label className="block text-xs font-medium mb-2" style={{ color: '#94a3b8' }}>Loại công</label>
                                 <div className="grid grid-cols-3 gap-2">
-                                    {types.map(t => (
+                                    {types.filter(t => t.code !== 'TYT').map(t => (
                                         <button
                                             key={t.code}
                                             id={`type-btn-${t.code}`}
